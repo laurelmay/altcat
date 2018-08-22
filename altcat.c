@@ -72,13 +72,14 @@ int main(int argc, char **argv) {
 
     int num_files = argc - 1;
     int fds[num_files];
+    struct stat stats[num_files];
 
     /*
      * Open all files and add them to the array of file descriptors.
      */
     for (int i = 0; i < num_files; i++) {
         char *in_filename = argv[i + 1];
-        fds[i] = open(argv[i + 1], O_RDONLY);
+        fds[i] = open(in_filename, O_RDONLY);
         if (fds[i] < 0) {
             if (errno == ENOENT) {
                 fprintf(stderr, "Unable to open %s. File does not exist.\n",
@@ -88,6 +89,12 @@ int main(int argc, char **argv) {
             }
             return EXIT_FAILURE;
         }
+
+        fstat(fds[i], (stats + i));
+        if S_ISDIR(stats[i].st_mode) {
+            fprintf(stderr, "%s is a directory.\n", in_filename);
+            return EXIT_FAILURE;
+        }
     }
 
     /*
@@ -95,13 +102,6 @@ int main(int argc, char **argv) {
      * non-zero status on error.
      */
     for (int i = 0; i < num_files; i++) {
-        /*
-         * Use fstat to determine the file size so we know how many bytes
-         * to copy.
-         */
-        struct stat st;
-        fstat(fds[i], &st);
-
         /* 
          * Copy between the file descriptors without an intermediate copy into
          * userspace. Try splice in case one is a pipe (which stdout often is);
@@ -110,10 +110,10 @@ int main(int argc, char **argv) {
          */
 
         ssize_t bytes = splice(fds[i], NULL, STDOUT_FILENO, NULL,
-                               st.st_size, 0);
+                               stats[i].st_size, 0);
 
         if (bytes == -1 && errno == EINVAL) {
-            bytes = sendfile(STDOUT_FILENO, fds[i], NULL, st.st_size);
+            bytes = sendfile(STDOUT_FILENO, fds[i], NULL, stats[i].st_size);
         }
 
         /*
